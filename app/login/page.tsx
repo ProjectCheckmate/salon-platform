@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -33,6 +33,7 @@ export default function LoginPage() {
     } else {
       setError("Incorrect email or password.");
     }
+
     setSubmitting(false);
   }
 
@@ -57,6 +58,7 @@ export default function LoginPage() {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2"
           />
         </div>
+
         <div>
           <label className="mb-1 block text-sm font-medium">Password</label>
           <input
@@ -67,8 +69,6 @@ export default function LoginPage() {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2"
           />
         </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
 
         <button
           type="submit"
@@ -86,5 +86,19 @@ export default function LoginPage() {
         </Link>
       </p>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-sm px-6 py-16">
+          <p>Loading...</p>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

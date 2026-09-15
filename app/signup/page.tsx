@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const referralCode = searchParams.get("ref") ?? undefined;
@@ -16,6 +16,7 @@ export default function SignupPage() {
     password: "",
     role: "CUSTOMER" as "CUSTOMER" | "OWNER",
   });
+
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -42,19 +43,24 @@ export default function SignupPage() {
             : "Something went wrong. Please try again."
       );
     }
+
     setSubmitting(false);
   }
 
   return (
     <main className="mx-auto max-w-sm px-6 py-16">
       <h1 className="mb-1 text-2xl font-semibold">Create your account</h1>
+
       <p className="mb-6 text-sm text-neutral-500">
-        {referralCode ? "You were referred by a friend — sign up to get your reward." : "Join the platform."}
+        {referralCode
+          ? "You were referred by a friend — sign up to get your reward."
+          : "Join the platform."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium">I am a…</label>
+
           <div className="flex gap-2">
             {(["CUSTOMER", "OWNER"] as const).map((r) => (
               <button
@@ -62,7 +68,9 @@ export default function SignupPage() {
                 type="button"
                 onClick={() => setForm({ ...form, role: r })}
                 className={`flex-1 rounded-lg border px-3 py-2 text-sm ${
-                  form.role === r ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300"
+                  form.role === r
+                    ? "border-neutral-900 bg-neutral-900 text-white"
+                    : "border-neutral-300"
                 }`}
               >
                 {r === "CUSTOMER" ? "Customer" : "Salon owner"}
@@ -80,6 +88,7 @@ export default function SignupPage() {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2"
           />
         </div>
+
         <div>
           <label className="mb-1 block text-sm font-medium">Email</label>
           <input
@@ -90,14 +99,18 @@ export default function SignupPage() {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2"
           />
         </div>
+
         <div>
-          <label className="mb-1 block text-sm font-medium">Phone (optional)</label>
+          <label className="mb-1 block text-sm font-medium">
+            Phone (optional)
+          </label>
           <input
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
             className="w-full rounded-lg border border-neutral-300 px-3 py-2"
           />
         </div>
+
         <div>
           <label className="mb-1 block text-sm font-medium">Password</label>
           <input
@@ -128,5 +141,19 @@ export default function SignupPage() {
         </Link>
       </p>
     </main>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-sm px-6 py-16">
+          <p>Loading...</p>
+        </main>
+      }
+    >
+      <SignupForm />
+    </Suspense>
   );
 }

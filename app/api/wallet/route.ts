@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db/prisma";
 import { requireSession } from "@/lib/permissions";
 import { withAuthErrors } from "@/lib/api/withAuthErrors";
 
+export const dynamic = "force-dynamic";
+
 export const GET = withAuthErrors(async function GET() {
   const session = await requireSession();
   const userId = (session.user as any).id as string;

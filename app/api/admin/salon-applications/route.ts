@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db/prisma";
 import { requireRole } from "@/lib/permissions";
 import { withAuthErrors } from "@/lib/api/withAuthErrors";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/salon-applications?status=PENDING
 export const GET = withAuthErrors(async function GET(req: NextRequest) {
   await requireRole("ADMIN");
