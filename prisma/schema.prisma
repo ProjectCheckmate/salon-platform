@@ -1,0 +1,621 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  OWNER
+  MANAGER
+  STAFF
+  CUSTOMER
+}
+
+enum SalonStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+  INACTIVE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String? // null if OTP-only account
+  phone         String?   @unique
+  role          Role      @default(CUSTOMER)
+  image         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+
+  ownedSalons Salon[]        @relation("SalonOwner")
+  staffOf     Staff[]
+  customer    CustomerProfile?
+  auditLogs   AuditLog[]
+  paymentsRecorded Payment[]
+  referralsSent     Referral[] @relation("ReferralsSent")
+  referralReceived  Referral?  @relation("ReferralsReceived")
+  wallet            Wallet?
+
+  @@index([role])
+}
+
+// --- NextAuth required models ---
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- Core tenant model (expanded in later phases) ---
+model Salon {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  name        String
+  ownerId     String
+  owner       User        @relation("SalonOwner", fields: [ownerId], references: [id])
+  status      SalonStatus @default(DRAFT)
+  address     String?
+  latitude    Float?
+  longitude   Float?
+  phone       String?
+  taxPercent  Int         @default(0) // e.g. 18 for 18% GST; 0 = no tax applied
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staff   Staff[]
+  application SalonApplication?
+  serviceCategories ServiceCategory[]
+  services    Service[]
+  workingHours SalonWorkingHours[]
+  holidays     Holiday[]
+  appointments Appointment[]
+  peakHourWindows PeakHourWindow[]
+  favourites   Favourite[]
+  reviews      Review[]
+  invoices     Invoice[]
+  loyaltyAccounts LoyaltyAccount[]
+  memberships  Membership[]
+  coupons      Coupon[]
+
+  @@index([status])
+  @@index([latitude, longitude])
+}
+
+model SalonApplication {
+  id        String      @id @default(cuid())
+  salonId   String      @unique
+  salon     Salon       @relation(fields: [salonId], references: [id])
+  status    SalonStatus @default(PENDING)
+  notes     String?
+  submittedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+}
+
+model Staff {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id])
+  salonId String
+  salon   Salon  @relation(fields: [salonId], references: [id])
+  active  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  staffServices StaffService[]
+  workingHours  StaffWorkingHours[]
+  breaks        StaffBreak[]
+  holidays      Holiday[]
+  appointments  Appointment[]
+
+  @@unique([userId, salonId])
+  @@index([salonId])
+}
+
+model CustomerProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Defaults true (opt-out model) rather than opt-in, matching how most
+  // booking confirmations/reminders are expected by default. Empty-slot
+  // and campaign messages specifically should still be considered more
+  // promotional than transactional — a real product would likely want a
+  // SEPARATE toggle for promotional vs transactional notifications rather
+  // than reusing this one flag for both; that distinction isn't built yet.
+  notificationsOptedIn Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  appointments Appointment[]
+  favourites   Favourite[]
+  reviews      Review[]
+  loyaltyAccounts LoyaltyAccount[]
+  membershipPurchases MembershipPurchase[]
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum BookingType {
+  NORMAL
+  PRIORITY
+}
+
+model ServiceCategory {
+  id      String    @id @default(cuid())
+  salonId String
+  salon   Salon     @relation(fields: [salonId], references: [id])
+  name    String
+  services Service[]
+
+  @@index([salonId])
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  salonId         String
+  salon           Salon    @relation(fields: [salonId], references: [id])
+  categoryId      String?
+  category        ServiceCategory? @relation(fields: [categoryId], references: [id])
+  name            String
+  description     String?
+  priceCents      Int
+  durationMinutes Int
+  bufferMinutes   Int      @default(0)
+  peakPriceCents  Int?
+  priorityAllowed Boolean  @default(false)
+  active          Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staffServices    StaffService[]
+  appointmentServices AppointmentService[]
+  membershipBenefits MembershipBenefit[]
+
+  @@index([salonId])
+}
+
+// Which staff can perform which services
+model StaffService {
+  id        String  @id @default(cuid())
+  staffId   String
+  staff     Staff   @relation(fields: [staffId], references: [id])
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([staffId, serviceId])
+}
+
+// Recurring weekly hours for the salon itself
+model SalonWorkingHours {
+  id        String  @id @default(cuid())
+  salonId   String
+  salon     Salon   @relation(fields: [salonId], references: [id])
+  weekday   Int // 0=Sunday .. 6=Saturday
+  isOpen    Boolean @default(true)
+  openTime  String? // "HH:mm" (salon-local time)
+  closeTime String?
+
+  @@unique([salonId, weekday])
+}
+
+// Recurring weekly hours per staff member (can differ from salon hours)
+model StaffWorkingHours {
+  id        String  @id @default(cuid())
+  staffId   String
+  staff     Staff   @relation(fields: [staffId], references: [id])
+  weekday   Int
+  isWorking Boolean @default(true)
+  startTime String? // "HH:mm"
+  endTime   String?
+
+  @@unique([staffId, weekday])
+}
+
+model StaffBreak {
+  id        String @id @default(cuid())
+  staffId   String
+  staff     Staff  @relation(fields: [staffId], references: [id])
+  weekday   Int
+  startTime String // "HH:mm"
+  endTime   String
+
+  @@index([staffId])
+}
+
+// One-off closures: salon holiday or staff leave (staffId null = whole salon)
+model Holiday {
+  id      String   @id @default(cuid())
+  salonId String
+  salon   Salon    @relation(fields: [salonId], references: [id])
+  staffId String? // null = applies to entire salon
+  staff   Staff?   @relation(fields: [staffId], references: [id])
+  date    DateTime // date-only, stored at midnight UTC of salon-local day
+  reason  String?
+
+  @@index([salonId, date])
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  salonId        String
+  salon          Salon             @relation(fields: [salonId], references: [id])
+  customerId     String
+  customer       CustomerProfile   @relation(fields: [customerId], references: [id])
+  staffId        String
+  staff          Staff             @relation(fields: [staffId], references: [id])
+  startTime      DateTime
+  endTime        DateTime
+  status         AppointmentStatus @default(PENDING)
+  bookingType    BookingType       @default(NORMAL)
+  // Real tax fix (closing last round's gap): Appointment stores the tax
+  // that was actually shown to and agreed by the customer at booking time,
+  // not recalculated later at invoice time from a possibly-different
+  // salon.taxPercent (which could change between booking and completion).
+  taxCents        Int               @default(0)
+  priorityFeeCents Int             @default(0)
+  totalAmountCents Int
+  paidAmountCents  Int             @default(0)
+  paymentStatus  PaymentStatus     @default(UNPAID)
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services AppointmentService[]
+  payments Payment[]
+  review   Review?
+  invoice  Invoice?
+
+  // The core anti-double-booking guarantee: the DB itself will reject
+  // two rows for the same staff member with the same exact start time.
+  // (Overlap beyond exact-start collisions is enforced in the booking
+  // engine transaction — see lib/booking-engine/createAppointment.ts)
+  @@unique([staffId, startTime])
+  @@index([salonId, startTime])
+  @@index([staffId, startTime])
+}
+
+model AppointmentService {
+  id            String      @id @default(cuid())
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  serviceId     String
+  service       Service     @relation(fields: [serviceId], references: [id])
+  priceCents    Int // snapshot of price at time of booking
+  durationMinutes Int // snapshot of duration at time of booking
+
+  @@index([appointmentId])
+}
+
+// Recurring windows where the service's peakPriceCents applies instead
+// of its base price. See lib/pricing/calculatePrice.ts for the calculation.
+model PeakHourWindow {
+  id        String @id @default(cuid())
+  salonId   String
+  salon     Salon  @relation(fields: [salonId], references: [id])
+  weekday   Int
+  startTime String // "HH:mm"
+  endTime   String
+
+  @@index([salonId])
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  ONLINE
+  WALLET
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  appointmentId String
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id])
+  amountCents   Int
+  method        PaymentMethod
+  // Nullable: cash/UPI recorded by staff always has a real user, but an
+  // ONLINE payment confirmed by the Razorpay webhook has no logged-in
+  // session — there's no human "actor" to attribute it to.
+  recordedById  String?
+  recordedBy    User?         @relation(fields: [recordedById], references: [id])
+  razorpayPaymentId String?   @unique // real idempotency key for webhook retries, once populated
+  createdAt     DateTime      @default(now())
+
+  @@index([appointmentId])
+}
+
+model Favourite {
+  id         String          @id @default(cuid())
+  customerId String
+  customer   CustomerProfile @relation(fields: [customerId], references: [id])
+  salonId    String
+  salon      Salon           @relation(fields: [salonId], references: [id])
+  createdAt  DateTime        @default(now())
+
+  @@unique([customerId, salonId])
+}
+
+model Review {
+  id            String          @id @default(cuid())
+  salonId       String
+  salon         Salon           @relation(fields: [salonId], references: [id])
+  customerId    String
+  customer      CustomerProfile @relation(fields: [customerId], references: [id])
+  appointmentId String          @unique // one review per completed appointment, enforced here
+  appointment   Appointment     @relation(fields: [appointmentId], references: [id])
+  rating        Int // 1-5
+  comment       String?
+  createdAt     DateTime        @default(now())
+
+  @@index([salonId])
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  appointmentId  String        @unique
+  appointment    Appointment   @relation(fields: [appointmentId], references: [id])
+  salonId        String
+  salon          Salon         @relation(fields: [salonId], references: [id])
+  invoiceNumber  String        @unique
+  subtotalCents  Int
+  discountCents  Int           @default(0)
+  taxCents       Int           @default(0)
+  totalCents     Int
+  paidCents      Int
+  dueCents       Int
+  issuedAt       DateTime      @default(now())
+
+  items InvoiceItem[]
+
+  @@index([salonId])
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+  description String
+  amountCents Int
+}
+
+model LoyaltyAccount {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    CustomerProfile @relation(fields: [customerId], references: [id])
+  salonId     String
+  salon       Salon    @relation(fields: [salonId], references: [id])
+  pointsBalance Int    @default(0)
+
+  transactions LoyaltyTransaction[]
+
+  @@unique([customerId, salonId])
+}
+
+enum LoyaltyTransactionType {
+  EARNED
+  REDEEMED
+  ADJUSTED
+}
+
+model LoyaltyTransaction {
+  id               String                 @id @default(cuid())
+  loyaltyAccountId String
+  loyaltyAccount   LoyaltyAccount         @relation(fields: [loyaltyAccountId], references: [id])
+  type             LoyaltyTransactionType
+  points           Int // positive for EARNED, negative for REDEEMED
+  appointmentId    String?
+  reason           String?
+  createdAt        DateTime               @default(now())
+
+  @@index([loyaltyAccountId])
+}
+
+model Membership {
+  id          String  @id @default(cuid())
+  salonId     String
+  salon       Salon   @relation(fields: [salonId], references: [id])
+  name        String // e.g. "GOLD MEMBERSHIP"
+  priceCents  Int
+  validityDays Int    @default(365)
+  discountPercent Int @default(0) // applies to services NOT covered by an included-visit benefit
+  active      Boolean @default(true)
+
+  benefits  MembershipBenefit[]
+  purchases MembershipPurchase[]
+
+  @@index([salonId])
+}
+
+// e.g. "5 Haircuts", "2 Facials" included in the package
+model MembershipBenefit {
+  id           String     @id @default(cuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id])
+  serviceId    String
+  service      Service    @relation(fields: [serviceId], references: [id])
+  includedCount Int // how many free uses of this service the package includes
+}
+
+model MembershipPurchase {
+  id           String     @id @default(cuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id])
+  customerId   String
+  customer     CustomerProfile @relation(fields: [customerId], references: [id])
+  purchasedAt  DateTime   @default(now())
+  expiresAt    DateTime
+
+  usages MembershipBenefitUsage[]
+
+  @@index([customerId])
+}
+
+model MembershipBenefitUsage {
+  id                    String              @id @default(cuid())
+  membershipPurchaseId  String
+  membershipPurchase    MembershipPurchase  @relation(fields: [membershipPurchaseId], references: [id])
+  serviceId             String
+  appointmentId         String
+  usedAt                DateTime            @default(now())
+
+  @@index([membershipPurchaseId])
+}
+
+enum ReferralStatus {
+  PENDING // referred person signed up but hasn't completed a qualifying booking yet
+  REWARDED // both sides paid out
+  EXPIRED
+}
+
+model Referral {
+  id                String         @id @default(cuid())
+  referrerId        String // the existing customer who shared their code
+  referrer          User           @relation("ReferralsSent", fields: [referrerId], references: [id])
+  referredUserId    String         @unique // one referral record per referred person - prevents reusing the same signup twice
+  referredUser      User           @relation("ReferralsReceived", fields: [referredUserId], references: [id])
+  code              String
+  status            ReferralStatus @default(PENDING)
+  qualifyingAppointmentId String?  // set once the referred person completes their first paid booking
+  rewardCents       Int
+  createdAt         DateTime       @default(now())
+  rewardedAt        DateTime?
+
+  @@index([referrerId])
+}
+
+enum CouponType {
+  PERCENTAGE
+  FIXED
+}
+
+model Coupon {
+  id             String     @id @default(cuid())
+  salonId        String
+  salon          Salon      @relation(fields: [salonId], references: [id])
+  code           String
+  type           CouponType
+  value          Int // percent (0-100) if PERCENTAGE, cents if FIXED
+  maxUsesTotal   Int? // null = unlimited
+  maxUsesPerCustomer Int    @default(1)
+  minSpendCents  Int        @default(0)
+  validFrom      DateTime   @default(now())
+  validUntil     DateTime?
+  active         Boolean    @default(true)
+
+  redemptions CouponRedemption[]
+
+  @@unique([salonId, code])
+}
+
+model CouponRedemption {
+  id            String   @id @default(cuid())
+  couponId      String
+  coupon        Coupon   @relation(fields: [couponId], references: [id])
+  customerId    String
+  appointmentId String   @unique
+  discountCents Int
+  createdAt     DateTime @default(now())
+
+  @@index([couponId])
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+}
+
+// Platform-wide, unlike LoyaltyAccount which is per-salon — this is where
+// referral rewards live, since a referral reward should be usable at ANY
+// salon on the platform, not just the one where the qualifying visit happened.
+model Wallet {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  balanceCents  Int      @default(0)
+
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id            String                @id @default(cuid())
+  walletId      String
+  wallet        Wallet                @relation(fields: [walletId], references: [id])
+  type          WalletTransactionType
+  amountCents   Int // always positive; type determines credit vs debit direction
+  reason        String
+  appointmentId String?
+  createdAt     DateTime              @default(now())
+
+  @@index([walletId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+}
